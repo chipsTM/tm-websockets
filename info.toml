@@ -1,0 +1,10 @@
+[meta]
+name     = "WebSockets"
+author   = "Chips"
+category = "Utility"
+version  = "0.1.0"
+
+siteid = 239
+
+[script]
+shared_exports = [ "src/WebSockets.as", "src/SecureWebSockets.as" ]
