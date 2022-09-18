@@ -7,4 +7,4 @@ version  = "0.1.0"
 siteid = 239
 
 [script]
-shared_exports = [ "src/WebSockets.as", "src/SecureWebSockets.as" ]
+shared_exports = [ "src/WebSockets.as", "src/Common.as", "src/SecureWebSockets.as" ]
