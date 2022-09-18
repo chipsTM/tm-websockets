@@ -11,7 +11,7 @@ namespace Net {
         }
 
         // Method for reading data from client
-        dictionary ReadData() {
+        dictionary@ ReadData() {
             if (Client !is null && Client.CanRead()) {
                 MemoryBuffer buffer;
                 while (Client.Available() != 0) {
@@ -158,20 +158,25 @@ namespace Net {
         }
 
 
-        void Listen(const string &in host, uint16 port, uint maxClients = 5) {
+        bool Listen(const string &in host, uint16 port, uint maxClients = 5) {
             MaxClients = maxClients;
 
             if (!tcpsocket.Listen(host, port)) {
                 trace("Could not establish a TCP socket!");
-                return;
+                return false;
             }
 
-            trace("Connecting to host...");
+            trace("Listening for clients...");
 
             while (!tcpsocket.CanRead()) {
                 yield();
             }
 
+            startnew(CoroutineFunc(ServerLoop));
+            return true;
+        }
+
+        void ServerLoop(){
             while (true) {
                 // we accept any incoming connections
                 // acceptclient will only accept max specified

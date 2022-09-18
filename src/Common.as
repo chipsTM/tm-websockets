@@ -157,7 +157,7 @@ namespace Net {
             return msg;
         }
 
-        shared dictionary parseFrame(Net::Socket@ socket, MemoryBuffer@ frame) {
+        shared dictionary@ parseFrame(Net::Socket@ socket, MemoryBuffer@ frame) {
             dictionary frameDict = {};
             frame.Seek(0);
             if (frame.GetSize() == 0) {
