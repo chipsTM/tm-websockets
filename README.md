@@ -1,9 +1,15 @@
 # [WebSockets](https://openplanet.dev/plugin/websockets)
 
+
+Provides a Websocket Client (secure and unsecure) and Server (unsecure) for Openplanet developers to use for plugins.
+
+
 Example Client Usage
 ```
 void Main() {
-    Net::WebSocket@ websocket = Net::WebSocket();
+    // we can spin up a secure and unsecure client
+    Net::WebSocket@ websocket = Net::SecureWebSocket();
+    // Net::WebSocket@ websocket = Net::WebSocket();
 
     // setup a callback for what to do if we get data from the server
     @(websocket.OnMessage) = function(dictionary@ evt) {
@@ -19,7 +25,7 @@ void Main() {
         return;
     }
 
-    // we can also send data to client
+    // we can also send data to server
     while (true) {
         websocket.Send("testing");
         sleep(100);
@@ -30,6 +36,7 @@ void Main() {
 Example Server Usage
 ```
 void Main() {
+    // We can only start a unsecure websockets server
     Net::WebSocket@ websocket = Net::WebSocket();
 
     if (!websocket.Listen("localhost", 5432)){

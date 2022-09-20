@@ -47,8 +47,8 @@ namespace Net {
         array<WebSocketClient@> Clients;
         uint MaxClients;
 
-        funcdef void CALLBACK(dictionary@);
-        CALLBACK@ OnMessage;
+        // funcdef void CALLBACK(dictionary@);
+        Net::CALLBACK@ OnMessage;
 
         WebSocket() {
             @tcpsocket = Net::Socket();
@@ -122,11 +122,11 @@ namespace Net {
             }
             
             // we've validated and now can send/receive messages
-            startnew(CoroutineFunc(Loop));
+            startnew(CoroutineFunc(ClientLoop));
             return true;
         }
 
-        void Loop() {
+        void ClientLoop() {
             while (true) {
                 if (tcpsocket.CanRead()) {
 
@@ -176,7 +176,7 @@ namespace Net {
             return true;
         }
 
-        void ServerLoop(){
+        void ServerLoop() {
             while (true) {
                 // we accept any incoming connections
                 // acceptclient will only accept max specified
@@ -225,9 +225,18 @@ namespace Net {
                 client.Close();
                 return;
             }
+            string key = string(headers["sec-websocket-key"]);
 
             // Complete handshake
-            string b64key = WSUtils::computeHash(string(headers["sec-websocket-key"]));
+            string b64key = WSUtils::computeHash(key);
+
+            // get a protocol if asked
+            string protocol;
+            if (headers.Exists("sec-websocket-protocol")) {
+                protocol = string(headers["sec-websocket-protocol"]);
+            } else {
+                protocol = "";
+            }
 
             // Complete the handshake
             if (!client.WriteRaw(
@@ -236,7 +245,7 @@ namespace Net {
                 "Connection: Upgrade\r\n" +
                 "Sec-WebSocket-Version: 13\r\n" +
                 "Sec-WebSocket-Accept: " + b64key + "\r\n" +
-                ((headers.Exists("sec-websocket-protocol")) ? "Sec-WebSocket-Protocol: " + string(headers["sec-websocket-protocol"]) + "\r\n" : "") +
+                ((protocol != "") ? "Sec-WebSocket-Protocol: " + protocol + "\r\n" : "") +
                 "\r\n"
             )) {
                 print("Could not complete handshake");
@@ -244,7 +253,7 @@ namespace Net {
             }
             trace("successfully upgraded connection to sockets");
             // add to connections
-            Clients.InsertLast(WebSocketClient(@client, (headers.Exists("sec-websocket-protocol")) ? string(headers["sec-websocket-protocol"]) : ""));
+            Clients.InsertLast(WebSocketClient(@client, protocol));
         }
 
         void Close() {

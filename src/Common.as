@@ -1,6 +1,9 @@
 namespace Net {
     // "Private" namespace for internal functions
     // in order to keep Net namespace clean
+
+    funcdef void CALLBACK(dictionary@);
+
     namespace WSUtils {
         // helper function to convert hex to dec values
         // only used in retrieving the bytes of the SHA1 key
@@ -36,6 +39,53 @@ namespace Net {
 
 
         shared dictionary parseResponseHeaders(Net::Socket@ conn) {
+            dictionary headers = {};
+            // While loop code snippet taken from Network test example script and slightly modified
+            // https://github.com/openplanet-nl/example-scripts/blob/master/Plugin_NetworkTest.as
+            while (true) {
+                // If there is no data available yet, yield and wait.
+                while (conn.Available() == 0) {
+                    yield();
+                }
+
+                // There's buffered data! Try to get a line from the buffer.
+                string line;
+                if (!conn.ReadLine(line)) {
+                    // We couldn't get a line at this point in time, so we'll wait a
+                    // bit longer.
+                    yield();
+                    continue;
+                }
+
+                // We got a line! Trim it, since ReadLine() returns the line including
+                // the newline characters.
+                line = line.Trim();
+                
+                // If the line is empty, we are done reading all headers.
+                if (line == "") {
+                    break;
+                }
+
+                // Get first line which contains HTTP version and status code
+                if (line.Contains("HTTP/")) {
+                    auto parts = line.Split(" ", 3);
+                    headers.Set("http_version", parts[0]);
+                    headers.Set("status_code", parts[1]);
+                    headers.Set("status_message", parts[2]);
+                } else {
+                    // Parse the header line.
+                    auto parts = line.Split(":", 2);
+                    if (parts.Length == 2) {
+                        headers.Set(parts[0].ToLower(), parts[1].Trim()); 
+                    } else {
+                        trace("Unable to parse header line.");
+                    }
+                }
+            }
+            return headers;
+        }
+
+        shared dictionary parseResponseHeaders(Net::SecureSocket@ conn) {
             dictionary headers = {};
             // While loop code snippet taken from Network test example script and slightly modified
             // https://github.com/openplanet-nl/example-scripts/blob/master/Plugin_NetworkTest.as
@@ -158,6 +208,76 @@ namespace Net {
         }
 
         shared dictionary@ parseFrame(Net::Socket@ socket, MemoryBuffer@ frame) {
+            dictionary frameDict = {};
+            frame.Seek(0);
+            if (frame.GetSize() == 0) {
+                return frameDict;
+            }
+            // print("frame size: " + frame.GetSize());
+            uint8 opCode = frame.ReadUInt8();
+
+            // This is a singular frame and text data
+            if (opCode == 0x81) {
+                uint8 maskAndPayloadLen = frame.ReadUInt8();
+                bool maskBit = ((maskAndPayloadLen & (1 << 7)) != 0) ? true : false;
+                
+                // Get actual payload size
+                uint64 actualPayloadLen;
+                uint8 offset;
+                uint8 payloadLen = maskAndPayloadLen & ~0x80;
+                if (payloadLen <= 125) {
+                    // 1 bytes of frame payload size
+                    actualPayloadLen = payloadLen;
+                    offset = 2;
+                } else if (payloadLen == 126) {
+                    // 2 bytes of frame payload size
+                    actualPayloadLen = Math::SwapBytes(frame.ReadUInt16());
+                    offset = 4;
+                } else if (payloadLen == 127) {
+                    // 8 bytes of frame payload size
+                    actualPayloadLen = Math::SwapBytes(frame.ReadUInt64());
+                    offset = 10;
+                }
+
+                if (maskBit) {
+                    offset += 4;
+                    // 4 bytes of Masking key
+                    MemoryBuffer maskingKey = MemoryBuffer(4);
+                    maskingKey.Write(frame.ReadUInt32());
+                    // Unmask the data and return
+                    MemoryBuffer@ data = xorMask(frame, maskingKey, offset, actualPayloadLen);
+                    frameDict.Set("message", data.ReadString(actualPayloadLen));
+                    return frameDict;
+                } else {
+                    // if no masking we can just return the data from frame
+                    frameDict.Set("message", frame.ReadString(actualPayloadLen));
+                    return frameDict;
+                }
+
+            } else if (opCode == 0x82) {
+                // binary data not supported (yet)
+                trace("data type not supported (yet)...");
+            } else if (opCode == 0x89) {
+                // got ping?
+                trace("ping...");
+            } else if (opCode == 0x8A) {
+                // pong? 
+                trace("pong...");
+            } else if (opCode == 0x88) {
+                // close?
+                trace("got close opCode");
+                socket.Close();
+            } else {
+                // websockets also supports multiple frames 
+                // (i.e. first bit 0; 0x0X)
+                // seems to be very rare
+                // print(opCode);
+                trace("data type not supported...");
+            }
+            return frameDict;
+        }
+
+        shared dictionary@ parseFrame(Net::SecureSocket@ socket, MemoryBuffer@ frame) {
             dictionary frameDict = {};
             frame.Seek(0);
             if (frame.GetSize() == 0) {
