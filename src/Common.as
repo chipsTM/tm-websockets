@@ -2,8 +2,6 @@ namespace Net {
     // "Private" namespace for internal functions
     // in order to keep Net namespace clean
 
-    funcdef void CALLBACK(dictionary@);
-
     namespace WSUtils {
         // helper function to convert hex to dec values
         // only used in retrieving the bytes of the SHA1 key
@@ -38,35 +36,11 @@ namespace Net {
         }
 
 
-        shared dictionary parseResponseHeaders(Net::Socket@ conn) {
+        shared dictionary parseResponseHeaders(array<string>@ headerLines) {
             dictionary headers = {};
-            // While loop code snippet taken from Network test example script and slightly modified
-            // https://github.com/openplanet-nl/example-scripts/blob/master/Plugin_NetworkTest.as
-            while (true) {
-                // If there is no data available yet, yield and wait.
-                while (conn.Available() == 0) {
-                    yield();
-                }
-
-                // There's buffered data! Try to get a line from the buffer.
-                string line;
-                if (!conn.ReadLine(line)) {
-                    // We couldn't get a line at this point in time, so we'll wait a
-                    // bit longer.
-                    yield();
-                    continue;
-                }
-
-                // We got a line! Trim it, since ReadLine() returns the line including
-                // the newline characters.
-                line = line.Trim();
-                
-                // If the line is empty, we are done reading all headers.
-                if (line == "") {
-                    break;
-                }
-
+            for (uint i = 0; i < headerLines.Length; i++) {
                 // Get first line which contains HTTP version and status code
+                string line = headerLines[i];
                 if (line.Contains("HTTP/")) {
                     auto parts = line.Split(" ", 3);
                     headers.Set("http_version", parts[0]);
@@ -85,67 +59,19 @@ namespace Net {
             return headers;
         }
 
-        shared dictionary parseResponseHeaders(Net::SecureSocket@ conn) {
-            dictionary headers = {};
-            // While loop code snippet taken from Network test example script and slightly modified
-            // https://github.com/openplanet-nl/example-scripts/blob/master/Plugin_NetworkTest.as
-            while (true) {
-                // If there is no data available yet, yield and wait.
-                while (conn.Available() == 0) {
-                    yield();
-                }
-
-                // There's buffered data! Try to get a line from the buffer.
-                string line;
-                if (!conn.ReadLine(line)) {
-                    // We couldn't get a line at this point in time, so we'll wait a
-                    // bit longer.
-                    yield();
-                    continue;
-                }
-
-                // We got a line! Trim it, since ReadLine() returns the line including
-                // the newline characters.
-                line = line.Trim();
-                
-                // If the line is empty, we are done reading all headers.
-                if (line == "") {
-                    break;
-                }
-
-                // Get first line which contains HTTP version and status code
-                if (line.Contains("HTTP/")) {
-                    auto parts = line.Split(" ", 3);
-                    headers.Set("http_version", parts[0]);
-                    headers.Set("status_code", parts[1]);
-                    headers.Set("status_message", parts[2]);
-                } else {
-                    // Parse the header line.
-                    auto parts = line.Split(":", 2);
-                    if (parts.Length == 2) {
-                        headers.Set(parts[0].ToLower(), parts[1].Trim()); 
-                    } else {
-                        trace("Unable to parse header line.");
-                    }
-                }
-            }
-            return headers;
-        }
-
-
-        shared MemoryBuffer@ xorMask(MemoryBuffer@ frame, MemoryBuffer@ maskingKey, uint8 offset, uint64 size) {
+        shared MemoryBuffer@ xorMask(MemoryBuffer@ dataBuffer, MemoryBuffer@ maskingKey, uint64 size) {
             MemoryBuffer coded = MemoryBuffer(size);
             for (uint64 i = 0; i < size; i++) {
-                frame.Seek(offset + i);
+                dataBuffer.Seek(i);
                 maskingKey.Seek(i % 4);
                 coded.Seek(i);
-                coded.Write(uint8(frame.ReadUInt8() ^ maskingKey.ReadUInt8()));
+                coded.Write(uint8(dataBuffer.ReadUInt8() ^ maskingKey.ReadUInt8()));
             }
             coded.Seek(0);
             return coded;
         }
 
-        shared MemoryBuffer@ generateFrame(const string &in data, bool client = false) {
+        shared MemoryBuffer@ generateFrame(uint8 opCode, const string &in data, bool client = false) {
             uint8 padBytes;
             uint8 payloadLen;
             if (data.Length <= 125) {
@@ -168,7 +94,7 @@ namespace Net {
             // Preallocate the buffer
             MemoryBuffer msg = MemoryBuffer(padBytes + data.Length);
             // Opcode and Text Data flags
-            msg.Write(uint8(0x81));
+            msg.Write(uint8(opCode));
             // Message Length
             if (client) {
                 // add masking bit
@@ -197,7 +123,7 @@ namespace Net {
                 buffer.Write(data);
 
                 // offset is 0 because we're reading from new buffer
-                MemoryBuffer@ maskedData = xorMask(buffer, maskingKey, 0, data.Length);
+                MemoryBuffer@ maskedData = xorMask(buffer, maskingKey, data.Length);
                 msg.WriteFromBuffer(maskedData, maskedData.GetSize());
             } else {
                 msg.Write(data);
@@ -207,144 +133,227 @@ namespace Net {
             return msg;
         }
 
-        shared dictionary@ parseFrame(Net::Socket@ socket, MemoryBuffer@ frame) {
-            dictionary frameDict = {};
-            frame.Seek(0);
-            if (frame.GetSize() == 0) {
-                return frameDict;
+        shared MemoryBuffer@ generateFrame(uint8 opCode, MemoryBuffer@ data, bool client = false) {
+            data.Seek(0);
+            uint8 padBytes;
+            uint8 payloadLen;
+            if (data.GetSize() <= 125) {
+                padBytes = 2;
+                payloadLen = data.GetSize();
+            } else if (data.GetSize() < uint64(Math::Pow(2,16))) {
+                padBytes = 4;
+                payloadLen = 126;
+            } else if (data.GetSize() < uint64(Math::Pow(2,64))) {
+                padBytes = 10;
+                payloadLen = 127;
             }
-            // print("frame size: " + frame.GetSize());
-            uint8 opCode = frame.ReadUInt8();
 
-            // This is a singular frame and text data
-            if (opCode == 0x81) {
-                uint8 maskAndPayloadLen = frame.ReadUInt8();
-                bool maskBit = ((maskAndPayloadLen & (1 << 7)) != 0) ? true : false;
-                
-                // Get actual payload size
-                uint64 actualPayloadLen;
-                uint8 offset;
-                uint8 payloadLen = maskAndPayloadLen & ~0x80;
-                if (payloadLen <= 125) {
-                    // 1 bytes of frame payload size
-                    actualPayloadLen = payloadLen;
-                    offset = 2;
-                } else if (payloadLen == 126) {
-                    // 2 bytes of frame payload size
-                    actualPayloadLen = Math::SwapBytes(frame.ReadUInt16());
-                    offset = 4;
-                } else if (payloadLen == 127) {
-                    // 8 bytes of frame payload size
-                    actualPayloadLen = Math::SwapBytes(frame.ReadUInt64());
-                    offset = 10;
-                }
+            // if we're sending data as client we need to mask
+            if (client) {
+                padBytes += 4;
+            }
 
-                if (maskBit) {
-                    offset += 4;
-                    // 4 bytes of Masking key
-                    MemoryBuffer maskingKey = MemoryBuffer(4);
-                    maskingKey.Write(frame.ReadUInt32());
-                    // Unmask the data and return
-                    MemoryBuffer@ data = xorMask(frame, maskingKey, offset, actualPayloadLen);
-                    frameDict.Set("message", data.ReadString(actualPayloadLen));
-                    return frameDict;
-                } else {
-                    // if no masking we can just return the data from frame
-                    frameDict.Set("message", frame.ReadString(actualPayloadLen));
-                    return frameDict;
-                }
-
-            } else if (opCode == 0x82) {
-                // binary data not supported (yet)
-                trace("data type not supported (yet)...");
-            } else if (opCode == 0x89) {
-                // got ping?
-                trace("ping...");
-            } else if (opCode == 0x8A) {
-                // pong? 
-                trace("pong...");
-            } else if (opCode == 0x88) {
-                // close?
-                trace("got close opCode");
-                socket.Close();
+            // Construct the Data Frame
+            // Preallocate the buffer
+            MemoryBuffer msg = MemoryBuffer(padBytes + data.GetSize());
+            // Opcode and Text Data flags
+            msg.Write(uint8(opCode));
+            // Message Length
+            if (client) {
+                // add masking bit
+                msg.Write(uint8(0x80 | payloadLen));
             } else {
-                // websockets also supports multiple frames 
-                // (i.e. first bit 0; 0x0X)
-                // seems to be very rare
-                // print(opCode);
-                trace("data type not supported...");
+                msg.Write(uint8(payloadLen));
             }
-            return frameDict;
+
+            if (payloadLen == 126) {
+                msg.Write(Math::SwapBytes(uint16(data.GetSize())));
+            } else if (payloadLen == 127) {
+                msg.Write(Math::SwapBytes(uint64(data.GetSize())));
+            }
+
+            // Write data to frame
+            if (client) {
+                // Generate masking key
+                MemoryBuffer maskingKey = MemoryBuffer(4);
+                uint randomMask = (Math::Rand(0,65536) << 16) | Math::Rand(0,65536);
+                maskingKey.Write(randomMask);
+                maskingKey.Seek(0);
+                msg.WriteFromBuffer(maskingKey, 4);
+
+                // Write data to buffer for masking operation
+                MemoryBuffer buffer = MemoryBuffer();
+                buffer.WriteFromBuffer(data, data.GetSize());
+
+                // offset is 0 because we're reading from new buffer
+                MemoryBuffer@ maskedData = xorMask(buffer, maskingKey, data.GetSize());
+                msg.WriteFromBuffer(maskedData, maskedData.GetSize());
+            } else {
+                msg.WriteFromBuffer(data, data.GetSize());
+            }
+            msg.Seek(0);
+
+            return msg;
         }
 
-        shared dictionary@ parseFrame(Net::SecureSocket@ socket, MemoryBuffer@ frame) {
-            dictionary frameDict = {};
-            frame.Seek(0);
-            if (frame.GetSize() == 0) {
-                return frameDict;
+        shared dictionary@ parseFrame(Net::Socket@ socket, bool client = false) {
+            uint8 firstByte = socket.ReadUint8();
+            uint8 secondByte = socket.ReadUint8();
+            bool maskBit = ((secondByte & (1 << 7)) != 0) ? true : false;
+            
+            // Get actual payload size
+            uint8 payloadLen = secondByte & ~0x80;
+            uint64 actualPayloadLen;
+            if (payloadLen <= 125) {
+                // 1 bytes of frame payload size
+                actualPayloadLen = payloadLen;
+            } else if (payloadLen == 126) {
+                // 2 bytes of frame payload size
+                actualPayloadLen = Math::SwapBytes(socket.ReadUint16());
+            } else if (payloadLen == 127) {
+                // 8 bytes of frame payload size
+                actualPayloadLen = Math::SwapBytes(socket.ReadUint64());
             }
-            // print("frame size: " + frame.GetSize());
-            uint8 opCode = frame.ReadUInt8();
 
-            // This is a singular frame and text data
-            if (opCode == 0x81) {
-                uint8 maskAndPayloadLen = frame.ReadUInt8();
-                bool maskBit = ((maskAndPayloadLen & (1 << 7)) != 0) ? true : false;
-                
-                // Get actual payload size
-                uint64 actualPayloadLen;
-                uint8 offset;
-                uint8 payloadLen = maskAndPayloadLen & ~0x80;
-                if (payloadLen <= 125) {
-                    // 1 bytes of frame payload size
-                    actualPayloadLen = payloadLen;
-                    offset = 2;
-                } else if (payloadLen == 126) {
-                    // 2 bytes of frame payload size
-                    actualPayloadLen = Math::SwapBytes(frame.ReadUInt16());
-                    offset = 4;
-                } else if (payloadLen == 127) {
-                    // 8 bytes of frame payload size
-                    actualPayloadLen = Math::SwapBytes(frame.ReadUInt64());
-                    offset = 10;
-                }
+            MemoryBuffer payloadData;
+            if (maskBit) {
+                // 4 bytes of Masking key
+                MemoryBuffer maskingKey = MemoryBuffer(4);
+                maskingKey.Write(socket.ReadUint32());
 
-                if (maskBit) {
-                    offset += 4;
-                    // 4 bytes of Masking key
-                    MemoryBuffer maskingKey = MemoryBuffer(4);
-                    maskingKey.Write(frame.ReadUInt32());
-                    // Unmask the data and return
-                    MemoryBuffer@ data = xorMask(frame, maskingKey, offset, actualPayloadLen);
-                    frameDict.Set("message", data.ReadString(actualPayloadLen));
-                    return frameDict;
-                } else {
-                    // if no masking we can just return the data from frame
-                    frameDict.Set("message", frame.ReadString(actualPayloadLen));
-                    return frameDict;
-                }
+                // Write data to buffer for masking operation
+                MemoryBuffer buffer = MemoryBuffer(actualPayloadLen);
+                buffer.Write(socket.ReadRaw(actualPayloadLen));
 
-            } else if (opCode == 0x82) {
-                // binary data not supported (yet)
-                trace("data type not supported (yet)...");
-            } else if (opCode == 0x89) {
-                // got ping?
-                trace("ping...");
-            } else if (opCode == 0x8A) {
-                // pong? 
-                trace("pong...");
-            } else if (opCode == 0x88) {
-                // close?
-                trace("got close opCode");
-                socket.Close();
+                // Unmask the data and return
+                payloadData = xorMask(buffer, maskingKey, actualPayloadLen);
             } else {
-                // websockets also supports multiple frames 
-                // (i.e. first bit 0; 0x0X)
-                // seems to be very rare
-                // print(opCode);
-                trace("data type not supported...");
+                // if no masking we can just return the data from buffer
+                payloadData.Write(socket.ReadRaw(actualPayloadLen));
             }
-            return frameDict;
+            payloadData.Seek(0);
+
+            dictionary frameDict = {};
+            switch(firstByte) {
+                case 0x81:
+                    // text data
+                    frameDict.Set("message", payloadData.ReadString(actualPayloadLen));
+                    return frameDict;
+                case 0x82:
+                    // binary data not supported (yet)
+                    trace("binary data type not supported (yet)...");
+                    break;
+                case 0x89:
+                    // got ping control code
+                    trace("ping...");
+                    break;
+                case 0x8A:
+                    // pong control code 
+                    trace("pong...");
+                    break;
+                case 0x88:
+                    // close control code
+                    trace("got close opCode");
+                    if (client) {
+                        if (!socket.Write(generateFrame(0x88, payloadData, true))) {
+                            trace("failed to send close frame");
+                        }
+                    } else {
+                        if (!socket.Write(generateFrame(0x88, payloadData))) {
+                            trace("failed to send close frame");
+                        }
+                    }
+                    socket.Close();
+                    break;
+                default:
+                    // websockets also supports continuation frames 
+                    // (i.e. first bit 0; 0x0X)
+                    // seems to be very rare
+                    // print(opCode);
+                    trace("got unimplemented opcode...");
+                    break;
+            }
+            return dictionary = {};
+        }
+
+        shared dictionary@ parseFrame(Net::SecureSocket@ socket, bool client = false) {
+            uint8 firstByte = socket.ReadUint8();
+            uint8 secondByte = socket.ReadUint8();
+            bool maskBit = ((secondByte & (1 << 7)) != 0) ? true : false;
+            
+            // Get actual payload size
+            uint8 payloadLen = secondByte & ~0x80;
+            uint64 actualPayloadLen;
+            if (payloadLen <= 125) {
+                // 1 bytes of frame payload size
+                actualPayloadLen = payloadLen;
+            } else if (payloadLen == 126) {
+                // 2 bytes of frame payload size
+                actualPayloadLen = Math::SwapBytes(socket.ReadUint16());
+            } else if (payloadLen == 127) {
+                // 8 bytes of frame payload size
+                actualPayloadLen = Math::SwapBytes(socket.ReadUint64());
+            }
+
+            MemoryBuffer payloadData;
+            if (maskBit) {
+                // 4 bytes of Masking key
+                MemoryBuffer maskingKey = MemoryBuffer(4);
+                maskingKey.Write(socket.ReadUint32());
+
+                // Write data to buffer for masking operation
+                MemoryBuffer buffer = MemoryBuffer(actualPayloadLen);
+                buffer.Write(socket.ReadRaw(actualPayloadLen));
+
+                // Unmask the data and return
+                payloadData = xorMask(buffer, maskingKey, actualPayloadLen);
+            } else {
+                // if no masking we can just return the data from buffer
+                payloadData.Write(socket.ReadRaw(actualPayloadLen));
+            }
+            payloadData.Seek(0);
+
+            dictionary frameDict = {};
+            switch(firstByte) {
+                case 0x81:
+                    // text data
+                    frameDict.Set("message", payloadData.ReadString(actualPayloadLen));
+                    return frameDict;
+                case 0x82:
+                    // binary data not supported (yet)
+                    trace("binary data type not supported...");
+                    break;
+                case 0x89:
+                    // got ping control code
+                    trace("ping...");
+                    break;
+                case 0x8A:
+                    // pong control code 
+                    trace("pong...");
+                    break;
+                case 0x88:
+                    // close control code
+                    trace("got close opCode");
+                    if (client) {
+                        if (!socket.Write(generateFrame(0x88, payloadData, true))) {
+                            trace("failed to send close frame");
+                        }
+                    } else {
+                        if (!socket.Write(generateFrame(0x88, payloadData))) {
+                            trace("failed to send close frame");
+                        }
+                    }
+                    socket.Close();
+                    break;
+                default:
+                    // websockets also supports continuation frames 
+                    // (i.e. first bit 0; 0x0X)
+                    // seems to be very rare
+                    // print(opCode);
+                    trace("got unimplemented opcode...");
+                    break;
+            }
+            return dictionary = {};
         }
     }
 }

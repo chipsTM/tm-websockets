@@ -1,6 +1,6 @@
 namespace Net {
 
-
+    // Server class for managing clients
     shared class WebSocketClient {
         Net::Socket@ Client;
         string Protocol;
@@ -11,23 +11,20 @@ namespace Net {
         }
 
         // Method for reading data from client
-        dictionary@ ReadData() {
+        dictionary@ GetMessage() {
             if (Client !is null && Client.CanRead()) {
-                MemoryBuffer buffer;
-                while (Client.Available() != 0) {
-                    buffer.Write(Client.ReadUint8());
+                // we need at least 2 bytes to read a beginning of frame
+                if (Client.Available() >= 2) {
+                    return WSUtils::parseFrame(@Client);
                 }
-                
-                return WSUtils::parseFrame(Client, buffer);
-            } else {
-                return dictionary = {};
             }
+            return dictionary = {};    
         }
 
         // method for sending Text data to client
-        void SendData(const string &in data) {
+        void SendMessage(const string &in data) {
             if (Client !is null && Client.CanWrite()) {
-                MemoryBuffer@ msg = WSUtils::generateFrame(data);
+                MemoryBuffer@ msg = WSUtils::generateFrame(0x81, data);
 
                 // Send msg over websockets
                 if (!Client.Write(msg)) {
@@ -36,6 +33,17 @@ namespace Net {
                     @Client = null;
                 }
             }
+        }
+
+        void Close() {
+            MemoryBuffer@ closeData = MemoryBuffer(2);
+            closeData.Write(Math::SwapBytes(uint16(1000)));
+            if (!Client.Write(WSUtils::generateFrame(0x88, closeData, true))) {
+                trace("failed to send close frame");
+            }
+            trace("WebSocket Server closed");
+            Client.Close();
+            @Client = null;
         }
     }
 
@@ -46,9 +54,6 @@ namespace Net {
         // "public"
         array<WebSocketClient@> Clients;
         uint MaxClients;
-
-        // funcdef void CALLBACK(dictionary@);
-        Net::CALLBACK@ OnMessage;
 
         WebSocket() {
             @tcpsocket = Net::Socket();
@@ -101,8 +106,28 @@ namespace Net {
                 return false;
             }
 
+
+            // While loop code snippet taken from Network test example script and slightly modified
+            // https://github.com/openplanet-nl/example-scripts/blob/master/Plugin_NetworkTest.as
+            array<string> headerLines;
+            while (true) {
+                while (tcpsocket.Available() == 0) {
+                    yield();
+                }
+                string line;
+                if (!tcpsocket.ReadLine(line)) {
+                    yield();
+                    continue;
+                }
+                line = line.Trim();
+                if (line == "") {
+                    break;
+                }
+                headerLines.InsertLast(line);
+            }
+            dictionary@ headers = WSUtils::parseResponseHeaders(@headerLines);
+
             bool validResponse = true;
-            dictionary headers = WSUtils::parseResponseHeaders(@tcpsocket);
             if (string(headers["status_code"]) != "101") {
                 validResponse = false;
             }
@@ -122,39 +147,33 @@ namespace Net {
             }
             
             // we've validated and now can send/receive messages
-            startnew(CoroutineFunc(ClientLoop));
             return true;
         }
 
-        void ClientLoop() {
-            while (true) {
-                if (tcpsocket.CanRead()) {
-
-                    MemoryBuffer buffer;
-                    while (tcpsocket.Available() != 0) {
-                        buffer.Write(tcpsocket.ReadUint8());
-                    }
-                    
-                    dictionary@ data = WSUtils::parseFrame(tcpsocket, buffer);
-                    if (OnMessage !is null) {
-                        OnMessage(data);
-                    }
-                }
+        dictionary@ GetMessage() {
+            if (!tcpsocket.CanRead()) {
                 yield();
             }
+            // we need at least 2 bytes to read a beginning of frame
+            while (tcpsocket.Available() < 2) {
+                yield();
+            }
+
+            return WSUtils::parseFrame(@tcpsocket, true);
         }
 
-        void Send(const string &in data) {
-            if (tcpsocket.CanWrite()) {
-                auto msg = WSUtils::generateFrame(data, true);
-
-                // Send msg over websockets
-                if (!tcpsocket.Write(msg)) {
-                    trace("unable to send message");
-                    tcpsocket.Close();
-                }
-                
+        void SendMessage(const string &in data) {
+            if (!tcpsocket.CanWrite()) {
+                yield();
             }
+
+            MemoryBuffer@ msg = WSUtils::generateFrame(0x81, data, true);
+
+            // Send msg over websockets
+            if (!tcpsocket.Write(msg)) {
+                trace("unable to send message");
+                tcpsocket.Close();
+            }                
         }
 
 
@@ -171,6 +190,8 @@ namespace Net {
             while (!tcpsocket.CanRead()) {
                 yield();
             }
+
+            // print("starting server loop");
 
             startnew(CoroutineFunc(ServerLoop));
             return true;
@@ -217,7 +238,25 @@ namespace Net {
                 return;
             }
 
-            dictionary headers = WSUtils::parseResponseHeaders(client);
+            // While loop code snippet taken from Network test example script and slightly modified
+            // https://github.com/openplanet-nl/example-scripts/blob/master/Plugin_NetworkTest.as
+            array<string> headerLines;
+            while (true) {
+                while (client.Available() == 0) {
+                    yield();
+                }
+                string line;
+                if (!client.ReadLine(line)) {
+                    yield();
+                    continue;
+                }
+                line = line.Trim();
+                if (line == "") {
+                    break;
+                }
+                headerLines.InsertLast(line);
+            }
+            dictionary@ headers = WSUtils::parseResponseHeaders(@headerLines);
 
             // We did not get a websocket header request
             // Close connection
@@ -257,6 +296,11 @@ namespace Net {
         }
 
         void Close() {
+            MemoryBuffer@ closeData = MemoryBuffer(2);
+            closeData.Write(Math::SwapBytes(uint16(1000)));
+            if (!tcpsocket.Write(WSUtils::generateFrame(0x88, closeData, true))) {
+                trace("failed to send close frame");
+            }
             trace("WebSocket Server closed");
             tcpsocket.Close();
         }

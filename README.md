@@ -6,30 +6,41 @@ Provides a Websocket Client (secure and unsecure) and Server (unsecure) for Open
 
 Example Client Usage
 ```
+// setup a coroutine for repeatedly fetching messages from server
+void ReadLoop() {
+    while (true) {
+        // returns a dictionary
+        auto msg = websocket.GetMessage();
+        if (msg.Exists("message")) {
+            print(string(msg["message"]).Trim());
+        }
+     
+        yield();
+    }
+}
+
 void Main() {
     // we can spin up a secure and unsecure client
     Net::WebSocket@ websocket = Net::SecureWebSocket();
     // Net::WebSocket@ websocket = Net::WebSocket();
 
-    // setup a callback for what to do if we get data from the server
-    @(websocket.OnMessage) = function(dictionary@ evt) {
-        if (evt.Exists("message")) {
-            print(string(evt["message"]));
-        } else {
-            print("not a message");
-        }
-    };
 
     if (!websocket.Connect("localhost", 5432)){
         print("unable to connect to websocket");
         return;
     }
 
+    startnew(ReadLoop);
+
     // we can also send data to server
     while (true) {
         websocket.Send("testing");
         sleep(100);
     }
+
+    // Close websockets client when finished
+    websocket.Close();
+
 }
 ```
 
@@ -45,6 +56,7 @@ void Main() {
     }
 
     while (true) {
+        // Clients is an array of websocket connections accepted by the server
         for (uint i = 0; i < websocket.Clients.Length; i++) {
             auto wsc = websocket.Clients[i];
             wsc.SendData("test");
@@ -55,5 +67,8 @@ void Main() {
         }
         yield();
     }
+
+    // Close websockets server when finished
+    websocket.Close();
 }
 ```

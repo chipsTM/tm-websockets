@@ -1,54 +1,9 @@
 namespace Net {
 
-
-    shared class SecureWebSocketClient {
-        Net::SecureSocket@ Client;
-        string Protocol;
-
-        SecureWebSocketClient(Net::SecureSocket@ client, const string &in protocol) {
-            @Client = @client;
-            Protocol = protocol;
-        }
-
-        // Method for reading data from client
-        dictionary@ ReadData() {
-            if (Client !is null && Client.CanRead()) {
-                MemoryBuffer buffer;
-                while (Client.Available() != 0) {
-                    buffer.Write(Client.ReadUint8());
-                }
-                
-                return WSUtils::parseFrame(Client, buffer);
-            } else {
-                return dictionary = {};
-            }
-        }
-
-        // method for sending Text data to client
-        void SendData(const string &in data) {
-            if (Client !is null && Client.CanWrite()) {
-                MemoryBuffer@ msg = WSUtils::generateFrame(data);
-
-                // Send msg over websockets
-                if (!Client.Write(msg)) {
-                    trace("Failed to send data to client");
-                    Client.Close();
-                    @Client = null;
-                }
-            }
-        }
-    }
-
-
+ 
     shared class SecureWebSocket {
         // "private"
         Net::SecureSocket@ tcpsocket;
-        // "public"
-        // array<SecureWebSocketClient@> Clients;
-        // uint MaxClients;
-
-        // funcdef void CALLBACK(dictionary@);
-        Net::CALLBACK@ OnMessage;
 
         SecureWebSocket() {
             @tcpsocket = Net::SecureSocket();
@@ -75,10 +30,6 @@ namespace Net {
                 yield();
             }
 
-            while (!tcpsocket.CanWrite()) {
-                yield();
-            }
-
             // Generate Random Key
             MemoryBuffer nonce = MemoryBuffer(16);
             for (uint8 i = 0; i < nonce.GetSize(); i++) {
@@ -90,6 +41,9 @@ namespace Net {
             // to validate in response
             string b64key = WSUtils::computeHash(key);
 
+            while (!tcpsocket.CanWrite()) {
+                yield();
+            }
             // Initiate Handshake
             if (!tcpsocket.WriteRaw(
                 "GET " + resource + " HTTP/1.1\r\n" +
@@ -105,8 +59,28 @@ namespace Net {
                 return false;
             }
 
+            // While loop code snippet taken from Network test example script and slightly modified
+            // https://github.com/openplanet-nl/example-scripts/blob/master/Plugin_NetworkTest.as
+            array<string> headerLines;
+            while (true) {
+                while (tcpsocket.Available() == 0) {
+                    yield();
+                }
+                string line;
+                if (!tcpsocket.ReadLine(line)) {
+                    yield();
+                    continue;
+                }
+                line = line.Trim();
+                if (line == "") {
+                    break;
+                }
+                headerLines.InsertLast(line);
+            }
+            dictionary@ headers = WSUtils::parseResponseHeaders(@headerLines);
+
+
             bool validResponse = true;
-            dictionary headers = WSUtils::parseResponseHeaders(@tcpsocket);
             if (string(headers["status_code"]) != "101") {
                 validResponse = false;
             }
@@ -121,146 +95,48 @@ namespace Net {
             }
             if (!validResponse) {
                 // trace("Unable to connect to websockets. Closing...");
-                Close();
+                tcpsocket.Close();
                 return false;
             }
             
             // we've validated and now can send/receive messages
-            startnew(CoroutineFunc(ClientLoop));
             return true;
         }
 
-        void ClientLoop() {
-            while (true) {
-                if (tcpsocket.CanRead()) {
-
-                    MemoryBuffer buffer;
-                    while (tcpsocket.Available() != 0) {
-                        buffer.Write(tcpsocket.ReadUint8());
-                    }
-                    
-                    dictionary@ data = WSUtils::parseFrame(tcpsocket, buffer);
-                    if (OnMessage !is null) {
-                        OnMessage(data);
-                    }
-                }
+        dictionary@ GetMessage() {
+            if (!tcpsocket.CanRead()) {
                 yield();
             }
-        }
-
-        void Send(const string &in data) {
-            if (tcpsocket.CanWrite()) {
-                auto msg = WSUtils::generateFrame(data, true);
-
-                // Send msg over websockets
-                if (!tcpsocket.Write(msg)) {
-                    trace("unable to send message");
-                    tcpsocket.Close();
-                }
-                
+            // we need at least 2 bytes to read a beginning of frame
+            while (tcpsocket.Available() < 2) {
+                yield();
             }
+
+            return WSUtils::parseFrame(@tcpsocket, true);
         }
 
 
-        // bool Listen(const string &in host, uint16 port, uint maxClients = 5) {
-        //     MaxClients = maxClients;
+        void SendMessage(const string &in data) {
+            if (!tcpsocket.CanWrite()) {
+                yield();
+            }
 
-        //     if (!tcpsocket.Listen(host, port)) {
-        //         trace("Could not establish a TCP socket!");
-        //         return false;
-        //     }
+            MemoryBuffer@ msg = WSUtils::generateFrame(0x81, data, true);
 
-        //     trace("Listening for clients...");
-
-        //     while (!tcpsocket.CanRead()) {
-        //         yield();
-        //     }
-
-        //     startnew(CoroutineFunc(ServerLoop));
-        //     return true;
-        // }
-
-        // void ServerLoop() {
-        //     while (true) {
-        //         // we accept any incoming connections
-        //         // acceptclient will only accept max specified
-        //         AcceptClient();
-
-
-        //         // this is a bit janky
-        //         // I think this can be improved
-        //         array<int> cleanup;
-        //         // // cleanup the failed connections
-        //         for (uint i = 0; i < Clients.Length; i++) {
-        //             // trace(Clients[i].Client is null);
-        //             if (Clients[i].Client is null) {
-        //                 cleanup.InsertLast(i);
-        //             }
-        //         }
-        //         // print("Cleanup " + cleanup.Length);
-        //         for (uint i = 0; i < cleanup.Length; i++) {
-        //             if (i < Clients.Length) {
-        //                 Clients.RemoveAt(i);
-        //             }
-        //         }
-                        
-        //         // do other activity
-        //         yield();
-        //     }
-        // }
-
-        // void AcceptClient() {
-        //     if (Clients.Length == MaxClients) {
-        //         // if full just return
-        //         return;
-        //     }
-        //     auto client = tcpsocket.Accept();
-        //     // trace("accepted websocket client");
-
-        //     if (client is null) {
-        //         return;
-        //     }
-
-        //     dictionary headers = WSUtils::parseResponseHeaders(client);
-
-        //     // We did not get a websocket header request
-        //     // Close connection
-        //     if (!headers.Exists("sec-websocket-key")) {
-        //         client.Close();
-        //         return;
-        //     }
-        //     string key = string(headers["sec-websocket-key"]);
-
-        //     // Complete handshake
-        //     string b64key = WSUtils::computeHash(key);
-
-        //     // get a protocol if asked
-        //     string protocol;
-        //     if (headers.Exists("sec-websocket-protocol")) {
-        //         protocol = string(headers["sec-websocket-protocol"]);
-        //     } else {
-        //         protocol = "";
-        //     }
-
-        //     // Complete the handshake
-        //     if (!client.WriteRaw(
-        //         "HTTP/1.1 101 Switching Protocols\r\n" +
-        //         "Upgrade: websocket\r\n" +
-        //         "Connection: Upgrade\r\n" +
-        //         "Sec-WebSocket-Version: 13\r\n" +
-        //         "Sec-WebSocket-Accept: " + b64key + "\r\n" +
-        //         ((protocol != "") ? "Sec-WebSocket-Protocol: " + protocol + "\r\n" : "") +
-        //         "\r\n"
-        //     )) {
-        //         print("Could not complete handshake");
-        //         return;
-        //     }
-        //     trace("successfully upgraded connection to sockets");
-        //     // add to connections
-        //     Clients.InsertLast(SecureWebSocketClient(@client, protocol));
-        // }
+            // Send msg over websockets
+            if (!tcpsocket.Write(msg)) {
+                trace("unable to send message");
+                tcpsocket.Close();
+            }  
+        }
 
         void Close() {
+            MemoryBuffer@ closeData = MemoryBuffer(2);
+            closeData.Write(Math::SwapBytes(uint16(1000)));
+            if (!tcpsocket.Write(WSUtils::generateFrame(0x88, closeData, true))) {
+                trace("failed to send close frame");
+            }
+            
             trace("WebSocket Server closed");
             tcpsocket.Close();
         }
