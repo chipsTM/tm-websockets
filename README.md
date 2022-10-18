@@ -1,5 +1,6 @@
 # [WebSockets](https://openplanet.dev/plugin/websockets)
 
+![Image](./opfiles/WebSockets.png)
 
 Provides a Websocket Client (secure and unsecure) and Server (unsecure) for Openplanet developers to use for plugins.
 
@@ -34,7 +35,7 @@ void Main() {
 
     // we can also send data to server
     while (true) {
-        websocket.Send("testing");
+        websocket.SendMessage("testing");
         sleep(100);
     }
 
@@ -59,8 +60,8 @@ void Main() {
         // Clients is an array of websocket connections accepted by the server
         for (uint i = 0; i < websocket.Clients.Length; i++) {
             auto wsc = websocket.Clients[i];
-            wsc.SendData("test");
-            auto data = wsc.ReadData();
+            wsc.SendMessage("test");
+            auto data = wsc.GetMessage();
             if (data.Exists("message")){
                 print(string(data["message"]));
             }
