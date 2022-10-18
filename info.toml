@@ -1,7 +1,7 @@
 [meta]
 name     = "WebSockets"
 author   = "chips"
-category = "Utility"
+category = "Utilities"
 version  = "0.1.0"
 
 siteid = 239

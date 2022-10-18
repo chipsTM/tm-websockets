@@ -28,21 +28,21 @@ namespace Net {
 
                 // Send msg over websockets
                 if (!Client.Write(msg)) {
-                    trace("Failed to send data to client");
+                    trace("Failed to send data to client. Closing connection");
                     Client.Close();
                     @Client = null;
                 }
             }
         }
 
-        void Close() {
+        void Close(uint16 code = 1000, const string &in reason = "") {
             MemoryBuffer@ closeData = MemoryBuffer(2);
-            closeData.Write(Math::SwapBytes(uint16(1000)));
-            closeData.Write("Closed from TM WebSockets");
+            closeData.Write(Math::SwapBytes(code));
+            closeData.Write(reason);
             if (!Client.Write(WSUtils::generateFrame(0x88, closeData))) {
-                trace("failed to send close frame");
+                throw("failed to send close frame");
             }
-            trace("WebSocket Client closed");
+            trace("WebSocket Client closed from server");
             Client.Close();
             @Client = null;
         }
@@ -52,6 +52,8 @@ namespace Net {
     shared class WebSocket {
         // "private"
         Net::Socket@ tcpsocket;
+        bool serverrunning;
+        bool isClient;
         // "public"
         array<WebSocketClient@> Clients;
         uint MaxClients;
@@ -61,6 +63,7 @@ namespace Net {
         }
 
         bool Connect(const string &in host, uint16 port, const string &in protocol = "") {
+            isClient = true;
             int resourceIndex = host.IndexOf("/");
             string resource;
             string baseHost;
@@ -143,7 +146,7 @@ namespace Net {
             }
             if (!validResponse) {
                 // trace("Unable to connect to websockets. Closing...");
-                Close();
+                tcpsocket.Close();
                 return false;
             }
             
@@ -160,7 +163,7 @@ namespace Net {
                 yield();
             }
 
-            return WSUtils::parseFrame(@tcpsocket, true);
+            return WSUtils::parseFrame(@tcpsocket, isClient);
         }
 
         void SendMessage(const string &in data) {
@@ -168,7 +171,7 @@ namespace Net {
                 yield();
             }
 
-            MemoryBuffer@ msg = WSUtils::generateFrame(0x81, data, true);
+            MemoryBuffer@ msg = WSUtils::generateFrame(0x81, data, isClient);
 
             // Send msg over websockets
             if (!tcpsocket.Write(msg)) {
@@ -180,6 +183,7 @@ namespace Net {
 
         bool Listen(const string &in host, uint16 port, uint maxClients = 5) {
             MaxClients = maxClients;
+            isClient = false;
 
             if (!tcpsocket.Listen(host, port)) {
                 trace("Could not establish a TCP socket!");
@@ -194,12 +198,17 @@ namespace Net {
 
             // print("starting server loop");
 
+            serverrunning = true;
             startnew(CoroutineFunc(ServerLoop));
             return true;
         }
 
         void ServerLoop() {
             while (true) {
+                if (!serverrunning) {
+                    // finish coroutine if Close called 
+                    break;
+                }
                 // we accept any incoming connections
                 // acceptclient will only accept max specified
                 AcceptClient();
@@ -221,10 +230,10 @@ namespace Net {
                         Clients.RemoveAt(i);
                     }
                 }
-                        
                 // do other activity
                 yield();
             }
+            trace("Server stopped");
         }
 
         void AcceptClient() {
@@ -296,14 +305,19 @@ namespace Net {
             Clients.InsertLast(WebSocketClient(@client, protocol));
         }
 
-        void Close() {
-            MemoryBuffer@ closeData = MemoryBuffer(2);
-            closeData.Write(Math::SwapBytes(uint16(1000)));
-            closeData.Write("Closed from TM WebSockets");
-            if (!tcpsocket.Write(WSUtils::generateFrame(0x88, closeData, true))) {
-                trace("failed to send close frame");
+        void Close(uint16 code = 1000, const string &in reason = "") {
+            if (isClient) {
+                MemoryBuffer@ closeData = MemoryBuffer(2);
+                closeData.Write(Math::SwapBytes(code));
+                closeData.Write(reason);
+                if (!tcpsocket.Write(WSUtils::generateFrame(0x88, closeData, isClient))) {
+                    throw("failed to send close frame");
+                }
+                trace("WebSocket Client closed");
+            } else {
+                serverrunning = false;
+                trace("WebSocket Server closed");
             }
-            trace("WebSocket Server closed");
             tcpsocket.Close();
         }
 

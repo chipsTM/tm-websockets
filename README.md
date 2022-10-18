@@ -10,12 +10,25 @@ Example Client Usage
 // setup a coroutine for repeatedly fetching messages from server
 void ReadLoop() {
     while (true) {
+        // important to prevent crashes
+        if (websocket is null) {
+            break;
+        }
+
         // returns a dictionary
         auto msg = websocket.GetMessage();
+
+        // check if message exists and print
         if (msg.Exists("message")) {
             print(string(msg["message"]).Trim());
         }
-     
+        
+        // can check for close code and reason
+        if (msg.Exists("closeCode")) {
+            print(uint16(msg["closeCode"]));
+            print(string(msg["reason"]));
+        }
+        
         yield();
     }
 }
@@ -40,8 +53,9 @@ void Main() {
     }
 
     // Close websockets client when finished
+    // Set websocket to null to stop ReadLoop
     websocket.Close();
-
+    @websocket = null;
 }
 ```
 
@@ -67,6 +81,12 @@ void Main() {
             }
         }
         yield();
+    }
+
+    // Good practice to close clients first before server
+    for (uint i = 0; i < websocket.Clients.Length; i++) {
+        auto wsc = websocket.Clients[i];
+        wsc.Close();
     }
 
     // Close websockets server when finished

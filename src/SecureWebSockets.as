@@ -4,12 +4,14 @@ namespace Net {
     shared class SecureWebSocket {
         // "private"
         Net::SecureSocket@ tcpsocket;
+        bool isClient;
 
         SecureWebSocket() {
             @tcpsocket = Net::SecureSocket();
         }
 
         bool Connect(const string &in host, uint16 port, const string &in protocol = "") {
+            isClient = true;
             int resourceIndex = host.IndexOf("/");
             string resource;
             string baseHost;
@@ -112,7 +114,7 @@ namespace Net {
                 yield();
             }
 
-            return WSUtils::parseFrame(@tcpsocket, true);
+            return WSUtils::parseFrame(@tcpsocket, isClient);
         }
 
 
@@ -121,24 +123,27 @@ namespace Net {
                 yield();
             }
 
-            MemoryBuffer@ msg = WSUtils::generateFrame(0x81, data, true);
+            MemoryBuffer@ msg = WSUtils::generateFrame(0x81, data, isClient);
 
             // Send msg over websockets
             if (!tcpsocket.Write(msg)) {
-                trace("unable to send message");
+                trace("unable to send message. Closing connection");
                 tcpsocket.Close();
             }  
         }
 
-        void Close() {
-            MemoryBuffer@ closeData = MemoryBuffer(2);
-            closeData.Write(Math::SwapBytes(uint16(1000)));
-            closeData.Write("Closed from TM WebSockets");
-            if (!tcpsocket.Write(WSUtils::generateFrame(0x88, closeData, true))) {
-                trace("failed to send close frame");
+        void Close(uint16 code = 1000, const string &in reason = "") {
+            if (isClient) {
+                MemoryBuffer@ closeData = MemoryBuffer(2);
+                closeData.Write(Math::SwapBytes(code));
+                closeData.Write(reason);
+                if (!tcpsocket.Write(WSUtils::generateFrame(0x88, closeData, isClient))) {
+                    throw("failed to send close frame");
+                }
+                trace("WebSocket Client closed");
+            } else {
+                trace("WebSocket Server closed");
             }
-            
-            trace("WebSocket Server closed");
             tcpsocket.Close();
         }
 
