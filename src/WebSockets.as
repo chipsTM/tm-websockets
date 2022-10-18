@@ -35,15 +35,18 @@ namespace Net {
             }
         }
 
-        void Close() {
+        bool Close() {
             MemoryBuffer@ closeData = MemoryBuffer(2);
             closeData.Write(Math::SwapBytes(uint16(1000)));
-            if (!Client.Write(WSUtils::generateFrame(0x88, closeData, true))) {
+            closeData.Write("Closed from TM WebSockets");
+            if (!Client.Write(WSUtils::generateFrame(0x88, closeData))) {
                 trace("failed to send close frame");
+                return false;
             }
-            trace("WebSocket Server closed");
+            trace("WebSocket Client closed");
             Client.Close();
             @Client = null;
+            return true;
         }
     }
 
@@ -298,6 +301,7 @@ namespace Net {
         void Close() {
             MemoryBuffer@ closeData = MemoryBuffer(2);
             closeData.Write(Math::SwapBytes(uint16(1000)));
+            closeData.Write("Closed from TM WebSockets");
             if (!tcpsocket.Write(WSUtils::generateFrame(0x88, closeData, true))) {
                 trace("failed to send close frame");
             }

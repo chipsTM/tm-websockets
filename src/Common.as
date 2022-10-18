@@ -253,18 +253,27 @@ namespace Net {
                     break;
                 case 0x88:
                     // close control code
-                    trace("got close opCode");
-                    if (client) {
-                        if (!socket.Write(generateFrame(0x88, payloadData, true))) {
-                            trace("failed to send close frame");
+                    {
+                        trace("got close opCode");
+                        dictionary closeEvent = {};
+                        closeEvent.Set("wasClean", true);
+                        if (client) {
+                            if (!socket.Write(generateFrame(0x88, payloadData, true))) {
+                                trace("failed to send close frame");
+                                closeEvent.Set("wasClean", false);
+                            }
+                        } else {
+                            if (!socket.Write(generateFrame(0x88, payloadData))) {
+                                trace("failed to send close frame");
+                                closeEvent.Set("wasClean", false);
+                            }
                         }
-                    } else {
-                        if (!socket.Write(generateFrame(0x88, payloadData))) {
-                            trace("failed to send close frame");
-                        }
+                        payloadData.Seek(0);
+                        closeEvent.Set("closeCode", Math::SwapBytes(payloadData.ReadUInt16()));
+                        closeEvent.Set("reason", payloadData.ReadString(actualPayloadLen-2));
+                        socket.Close();
+                        return closeEvent;
                     }
-                    socket.Close();
-                    break;
                 default:
                     // websockets also supports continuation frames 
                     // (i.e. first bit 0; 0x0X)
@@ -333,18 +342,27 @@ namespace Net {
                     break;
                 case 0x88:
                     // close control code
-                    trace("got close opCode");
-                    if (client) {
-                        if (!socket.Write(generateFrame(0x88, payloadData, true))) {
-                            trace("failed to send close frame");
+                    {
+                        trace("got close opCode");
+                        dictionary closeEvent = {};
+                        closeEvent.Set("wasClean", true);
+                        if (client) {
+                            if (!socket.Write(generateFrame(0x88, payloadData, true))) {
+                                trace("failed to send close frame");
+                                closeEvent.Set("wasClean", false);
+                            }
+                        } else {
+                            if (!socket.Write(generateFrame(0x88, payloadData))) {
+                                trace("failed to send close frame");
+                                closeEvent.Set("wasClean", false);
+                            }
                         }
-                    } else {
-                        if (!socket.Write(generateFrame(0x88, payloadData))) {
-                            trace("failed to send close frame");
-                        }
+                        payloadData.Seek(0);
+                        closeEvent.Set("closeCode", Math::SwapBytes(payloadData.ReadUInt16()));
+                        closeEvent.Set("reason", payloadData.ReadString(actualPayloadLen-2));
+                        socket.Close();
+                        return closeEvent;
                     }
-                    socket.Close();
-                    break;
                 default:
                     // websockets also supports continuation frames 
                     // (i.e. first bit 0; 0x0X)
