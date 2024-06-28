@@ -12,7 +12,7 @@ namespace Net {
 
         // Method for reading data from client
         dictionary@ GetMessage() {
-            if (Client !is null && Client.CanRead()) {
+            if (Client !is null && Client.IsReady()) {
                 // we need at least 2 bytes to read a beginning of frame
                 if (Client.Available() >= 2) {
                     return WSUtils::parseFrame(@Client);
@@ -23,7 +23,7 @@ namespace Net {
 
         // method for sending Text data to client
         void SendMessage(const string &in data) {
-            if (Client !is null && Client.CanWrite()) {
+            if (Client !is null && Client.IsReady()) {
                 MemoryBuffer@ msg = WSUtils::generateFrame(0x81, data);
 
                 // Send msg over websockets
@@ -80,7 +80,7 @@ namespace Net {
                 return false;
             }
 
-            while (!tcpsocket.CanWrite()) {
+            while (!tcpsocket.IsReady()) {
                 yield();
             }
 
@@ -155,7 +155,7 @@ namespace Net {
         }
 
         dictionary@ GetMessage() {
-            if (!tcpsocket.CanRead()) {
+            if (!tcpsocket.IsReady()) {
                 yield();
             }
             // we need at least 2 bytes to read a beginning of frame
@@ -167,7 +167,7 @@ namespace Net {
         }
 
         void SendMessage(const string &in data) {
-            if (!tcpsocket.CanWrite()) {
+            if (!tcpsocket.IsReady()) {
                 yield();
             }
 
@@ -192,7 +192,7 @@ namespace Net {
 
             trace("Listening for clients...");
 
-            while (!tcpsocket.CanRead()) {
+            while (!tcpsocket.IsReady()) {
                 yield();
             }
 

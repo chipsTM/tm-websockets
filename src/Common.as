@@ -25,7 +25,7 @@ namespace Net {
         }
 
         shared string computeHash(const string &in key) {
-            string hashkey = Hash::Sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+            string hashkey = Crypto::Sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
             auto bytearray = MemoryBuffer(20);
             for (int i = 0; i < hashkey.Length; i+=2) {
                 uint8 dec = getHexToDec(hashkey.SubStr(i,1)) * 16 + getHexToDec(hashkey.SubStr(i+1,1));

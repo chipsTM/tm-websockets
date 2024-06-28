@@ -2,9 +2,7 @@
 name     = "WebSockets"
 author   = "chips"
 category = "Utilities"
-version  = "0.1.0"
-
-siteid = 239
+version  = "0.1.2"
 
 [script]
 shared_exports = [ "src/WebSockets.as", "src/Common.as", "src/SecureWebSockets.as" ]
