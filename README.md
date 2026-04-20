@@ -4,6 +4,7 @@
 
 Provides a Websocket Client (secure and unsecure) and Server (unsecure) for Openplanet developers to use for plugins.
 
+Minimum Openplanet Version: 1.29.6
 
 Example Client Usage
 ```
@@ -34,11 +35,10 @@ void ReadLoop() {
 }
 
 void Main() {
-    // we can spin up a secure and unsecure client
-    Net::WebSocket@ websocket = Net::SecureWebSocket();
-    // Net::WebSocket@ websocket = Net::WebSocket();
+    Net::WebSocket@ websocket = Net::WebSocket();
 
-
+    // client is now defaulted to secure
+    // pass `secure = false` to unset
     if (!websocket.Connect("localhost", 5432)){
         print("unable to connect to websocket");
         return;

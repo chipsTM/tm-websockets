@@ -62,7 +62,8 @@ namespace Net {
             @tcpsocket = Net::Socket();
         }
 
-        bool Connect(const string &in host, uint16 port, const string &in protocol = "") {
+        // use secure sockets by default
+        bool Connect(const string &in host, uint16 port, bool secure = true, const string &in protocol = "") {
             isClient = true;
             int resourceIndex = host.IndexOf("/");
             string resource;
@@ -75,7 +76,7 @@ namespace Net {
                 resource = "/";
             }
 
-            if (!tcpsocket.Connect(baseHost, port)) {
+            if (!tcpsocket.Connect(baseHost, port, secure = secure)) {
                 // trace("Could not establish a TCP socket!");
                 return false;
             }
@@ -175,7 +176,7 @@ namespace Net {
 
             // Send msg over websockets
             if (!tcpsocket.Write(msg)) {
-                trace("unable to send message");
+                trace("unable to send message. Closing connection");
                 tcpsocket.Close();
             }                
         }

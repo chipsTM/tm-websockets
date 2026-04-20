@@ -23,10 +23,10 @@ void ReadLoop() {
     }
 }
 
-Net::SecureWebSocket@ websocket;
+Net::WebSocket@ websocket;
 
 void Main() {
-    @websocket = Net::SecureWebSocket();
+    @websocket = Net::WebSocket();
 
     if (!websocket.Connect("irc-ws.chat.twitch.tv", 443)){
         print("unable to connect to websocket");
