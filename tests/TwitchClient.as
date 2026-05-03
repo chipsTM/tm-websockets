@@ -6,7 +6,7 @@ void ReadLoop() {
         }
 
         // returns a dictionary
-        auto msg = websocket.GetMessage();
+        dictionary@ msg = websocket.GetMessage();
 
         // check if message exists and print
         if (msg.Exists("message")) {

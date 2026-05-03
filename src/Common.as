@@ -50,7 +50,9 @@ namespace Net {
                     // Parse the header line.
                     auto parts = line.Split(":", 2);
                     if (parts.Length == 2) {
-                        headers.Set(parts[0].ToLower(), parts[1].Trim()); 
+                        headers.Set(parts[0].ToLower(), parts[1].Trim());
+                    } else if (line == "") {
+                        // trace("Got empty header line");
                     } else {
                         trace("Unable to parse header line.");
                     }
@@ -200,7 +202,7 @@ namespace Net {
             uint8 firstByte = socket.ReadUint8();
             uint8 secondByte = socket.ReadUint8();
             bool maskBit = ((secondByte & (1 << 7)) != 0) ? true : false;
-            
+
             // Get actual payload size
             uint8 payloadLen = secondByte & ~0x80;
             uint64 actualPayloadLen;
@@ -248,7 +250,7 @@ namespace Net {
                     trace("ping...");
                     break;
                 case 0x8A:
-                    // pong control code 
+                    // pong control code
                     trace("pong...");
                     break;
                 case 0x88:
@@ -275,7 +277,7 @@ namespace Net {
                         return closeEvent;
                     }
                 default:
-                    // websockets also supports continuation frames 
+                    // websockets also supports continuation frames
                     // (i.e. first bit 0; 0x0X)
                     // seems to be very rare
                     // print(opCode);

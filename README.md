@@ -17,7 +17,7 @@ void ReadLoop() {
         }
 
         // returns a dictionary
-        auto msg = websocket.GetMessage();
+        dictionary@ msg = websocket.GetMessage();
 
         // check if message exists and print
         if (msg.Exists("message")) {
@@ -63,19 +63,20 @@ Example Server Usage
 ```
 void Main() {
     // We can only start a unsecure websockets server
-    Net::WebSocket@ websocket = Net::WebSocket();
+    Net::WebSocket@ wsServer = Net::WebSocket();
 
-    if (!websocket.Listen("localhost", 5432)){
+    if (!wsServer.Listen("localhost", 5432)){
         print("unable to start websocket server");
         return;
     }
 
+    // simulating update loop
     while (true) {
         // Clients is an array of websocket connections accepted by the server
-        for (uint i = 0; i < websocket.Clients.Length; i++) {
-            auto wsc = websocket.Clients[i];
-            wsc.SendMessage("test");
-            auto data = wsc.GetMessage();
+        for (uint i = 0; i < wsServer.Clients.Length; i++) {
+            Net::WebSocketClient@ wsClient = wsServer.Clients[i];
+            wsClient.SendMessage("test");
+            dictionary@ data = wsClient.GetMessage();
             if (data.Exists("message")){
                 print(string(data["message"]));
             }
@@ -84,12 +85,12 @@ void Main() {
     }
 
     // Good practice to close clients first before server
-    for (uint i = 0; i < websocket.Clients.Length; i++) {
-        auto wsc = websocket.Clients[i];
-        wsc.Close();
+    for (uint i = 0; i < wsServer.Clients.Length; i++) {
+        Net::WebSocketClient@ wsClient = wsServer.Clients[i];
+        wsClient.Close();
     }
 
     // Close websockets server when finished
-    websocket.Close();
+    wsServer.Close();
 }
 ```

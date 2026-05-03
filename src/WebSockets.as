@@ -18,7 +18,7 @@ namespace Net {
                     return WSUtils::parseFrame(@Client);
                 }
             }
-            return dictionary = {};    
+            return dictionary = {};
         }
 
         // method for sending Text data to client
@@ -111,25 +111,20 @@ namespace Net {
                 return false;
             }
 
-
-            // While loop code snippet taken from Network test example script and slightly modified
-            // https://github.com/openplanet-nl/example-scripts/blob/master/Plugin_NetworkTest.as
-            array<string> headerLines;
-            while (true) {
-                while (tcpsocket.Available() == 0) {
-                    yield();
-                }
-                string line;
-                if (!tcpsocket.ReadLine(line)) {
-                    yield();
-                    continue;
-                }
-                line = line.Trim();
-                if (line == "") {
-                    break;
-                }
-                headerLines.InsertLast(line);
+            // wait until some bytes are available
+            while (tcpsocket.Available() == 0) {
+                yield();
             }
+            // read header until bytes are exhausted
+            string bufferString;
+            do {
+                int bytesAvailable = tcpsocket.Available();
+                MemoryBuffer@ curBuf = tcpsocket.ReadBuffer(bytesAvailable);
+                curBuf.Seek(0);
+                bufferString += curBuf.ReadString(curBuf.GetSize());
+            } while (tcpsocket.Available() != 0);
+            // split the header on \r\n for parsing
+            array<string> headerLines = bufferString.Split("\r\n");
             dictionary@ headers = WSUtils::parseResponseHeaders(@headerLines);
 
             bool validResponse = true;
@@ -150,12 +145,17 @@ namespace Net {
                 tcpsocket.Close();
                 return false;
             }
-            
+
             // we've validated and now can send/receive messages
             return true;
         }
 
         dictionary@ GetMessage() {
+            if (!isClient || serverrunning) {
+                warn("It looks like you're in server mode. You shouldn't call `GetMessage` on the server object");
+                return dictionary = {};
+            }
+
             if (!tcpsocket.IsReady()) {
                 yield();
             }
@@ -168,6 +168,11 @@ namespace Net {
         }
 
         void SendMessage(const string &in data) {
+            if (!isClient || serverrunning) {
+                warn("It looks like you're in server mode. You shouldn't call `SendMessage` on the server object");
+                return;
+            }
+
             if (!tcpsocket.IsReady()) {
                 yield();
             }
@@ -178,7 +183,7 @@ namespace Net {
             if (!tcpsocket.Write(msg)) {
                 trace("unable to send message. Closing connection");
                 tcpsocket.Close();
-            }                
+            }
         }
 
 
@@ -207,7 +212,7 @@ namespace Net {
         void ServerLoop() {
             while (true) {
                 if (!serverrunning) {
-                    // finish coroutine if Close called 
+                    // finish coroutine if Close called
                     break;
                 }
                 // we accept any incoming connections
@@ -243,30 +248,24 @@ namespace Net {
                 return;
             }
             auto client = tcpsocket.Accept();
-            // trace("accepted websocket client");
-
             if (client is null) {
                 return;
             }
 
-            // While loop code snippet taken from Network test example script and slightly modified
-            // https://github.com/openplanet-nl/example-scripts/blob/master/Plugin_NetworkTest.as
-            array<string> headerLines;
-            while (true) {
-                while (client.Available() == 0) {
-                    yield();
-                }
-                string line;
-                if (!client.ReadLine(line)) {
-                    yield();
-                    continue;
-                }
-                line = line.Trim();
-                if (line == "") {
-                    break;
-                }
-                headerLines.InsertLast(line);
+            // wait until some bytes are available
+            while (client.Available() == 0) {
+                yield();
             }
+            // read header until bytes are exhausted
+            string bufferString;
+            do {
+                int bytesAvailable = client.Available();
+                MemoryBuffer@ curBuf = client.ReadBuffer(bytesAvailable);
+                curBuf.Seek(0);
+                bufferString += curBuf.ReadString(curBuf.GetSize());
+            } while (client.Available() != 0);
+            // split the header on \r\n for parsing
+            array<string> headerLines = bufferString.Split("\r\n");
             dictionary@ headers = WSUtils::parseResponseHeaders(@headerLines);
 
             // We did not get a websocket header request
