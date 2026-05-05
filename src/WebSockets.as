@@ -13,9 +13,14 @@ namespace Net {
         // Method for reading data from client
         dictionary@ GetMessage() {
             if (Client !is null && Client.IsReady()) {
-                // we need at least 2 bytes to read a beginning of frame
-                if (Client.Available() >= 2) {
-                    return WSUtils::parseFrame(@Client);
+                if (!Client.IsHungUp()) {
+                    // we need at least 2 bytes to read a beginning of frame
+                    if (Client.Available() >= 2) {
+                        return WSUtils::parseFrame(@Client);
+                    }
+                } else {
+                    trace("client hung, closing connection");
+                    Close();
                 }
             }
             return dictionary = {};
@@ -29,8 +34,7 @@ namespace Net {
                 // Send msg over websockets
                 if (!Client.Write(msg)) {
                     trace("Failed to send data to client. Closing connection");
-                    Client.Close();
-                    @Client = null;
+                    Close();
                 }
             }
         }
@@ -40,7 +44,7 @@ namespace Net {
             closeData.Write(Math::SwapBytes(code));
             closeData.Write(reason);
             if (!Client.Write(WSUtils::generateFrame(0x88, closeData))) {
-                throw("failed to send close frame");
+                trace("failed to send close frame");
             }
             trace("WebSocket Client closed from server");
             Client.Close();
@@ -111,20 +115,24 @@ namespace Net {
                 return false;
             }
 
-            // wait until some bytes are available
-            while (tcpsocket.Available() == 0) {
-                yield();
+            // While loop code snippet taken from Network test example script and slightly modified
+            // https://github.com/openplanet-nl/example-scripts/blob/master/Plugin_NetworkTest.as
+            array<string> headerLines;
+            while (true) {
+                while (tcpsocket.Available() == 0) {
+                    yield();
+                }
+                string line;
+                if (!tcpsocket.ReadLine(line)) {
+                    yield();
+                    continue;
+                }
+                line = line.Trim();
+                if (line == "") {
+                    break;
+                }
+                headerLines.InsertLast(line);
             }
-            // read header until bytes are exhausted
-            string bufferString;
-            do {
-                int bytesAvailable = tcpsocket.Available();
-                MemoryBuffer@ curBuf = tcpsocket.ReadBuffer(bytesAvailable);
-                curBuf.Seek(0);
-                bufferString += curBuf.ReadString(curBuf.GetSize());
-            } while (tcpsocket.Available() != 0);
-            // split the header on \r\n for parsing
-            array<string> headerLines = bufferString.Split("\r\n");
             dictionary@ headers = WSUtils::parseResponseHeaders(@headerLines);
 
             bool validResponse = true;
@@ -252,20 +260,24 @@ namespace Net {
                 return;
             }
 
-            // wait until some bytes are available
-            while (client.Available() == 0) {
-                yield();
+            // While loop code snippet taken from Network test example script and slightly modified
+            // https://github.com/openplanet-nl/example-scripts/blob/master/Plugin_NetworkTest.as
+            array<string> headerLines;
+            while (true) {
+                while (client.Available() == 0) {
+                    yield();
+                }
+                string line;
+                if (!client.ReadLine(line)) {
+                    yield();
+                    continue;
+                }
+                line = line.Trim();
+                if (line == "") {
+                    break;
+                }
+                headerLines.InsertLast(line);
             }
-            // read header until bytes are exhausted
-            string bufferString;
-            do {
-                int bytesAvailable = client.Available();
-                MemoryBuffer@ curBuf = client.ReadBuffer(bytesAvailable);
-                curBuf.Seek(0);
-                bufferString += curBuf.ReadString(curBuf.GetSize());
-            } while (client.Available() != 0);
-            // split the header on \r\n for parsing
-            array<string> headerLines = bufferString.Split("\r\n");
             dictionary@ headers = WSUtils::parseResponseHeaders(@headerLines);
 
             // We did not get a websocket header request
@@ -311,7 +323,7 @@ namespace Net {
                 closeData.Write(Math::SwapBytes(code));
                 closeData.Write(reason);
                 if (!tcpsocket.Write(WSUtils::generateFrame(0x88, closeData, isClient))) {
-                    throw("failed to send close frame");
+                    trace("failed to send close frame");
                 }
                 trace("WebSocket Client closed");
             } else {
